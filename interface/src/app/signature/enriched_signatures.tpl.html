@@ -1,0 +1,58 @@
+<div class="page-header">
+  <h3>ADAGE: Enriched Signatures</h3>
+  <ml-model-view></ml-model-view>
+  <ml-model-validator model-id="ctrl.modelInUrl"
+                      is-valid-model="ctrl.isValidModel">
+  </ml-model-validator>
+</div>
+
+<div ng-if="ctrl.isValidModel">
+  <h4 class="text-warning" ng-bind="ctrl.statusMessage"></h4>
+
+  <p>
+    Explore signatures that significantly overlap with the genes you selected;
+    can help with interpretation of the underlying process or processes.
+  </p>
+
+  <div class="container" ng-hide="ctrl.statusMessage">
+    <table id="enrichment-table" class="table table-striped">
+      <thead>
+        <tr>
+          <th>Signature</th> 
+          <th>Gene participation type in signature</th>
+          <th>Overlapping genes in this signature</th>
+          <th>P-Value (FDR Corrected)</th>
+        </tr>
+      </thead>
+
+      <tr ng-repeat="signature in enrichedSignatures | limitTo: numSignaturesShown">
+        <td><a href="{{signature.url}}">{{signature.name}}</a></td>
+        <td>{{signature.pValue}}</td>
+        <td>{{signature.genes}}</td>
+      </tr>
+
+      <tr ng-click="setMode()" ng-show="topMode">
+        <td>
+          <button type="button" class="btn btn-default">Show all ...</button>
+        </td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+      <tr ng-click="setMode()" ng-hide="topMode">
+        <td>
+          <button type="button" class="btn btn-default">Only show top {{topNum}}</button>
+        </td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+
+    </table>
+
+    <div ng-if="enrichedSignatures.length === 0">
+      No signatures were found to be enriched with a P-Value of less than
+      {{pValueCutoff}}.
+    </div>
+  </div>
+</div>
