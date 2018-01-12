@@ -4,8 +4,10 @@
 
 angular.module('adage.enrichedSignatures', [
   'ui.router',
-  'adage.tribe_client.resource',
-  'adage.gene.resource'
+  'adage.signature.resources',
+  'adage.participation.resources',
+  'adage.gene.resource',
+  'greenelab.stats'
 ])
 
 .config(['$stateProvider', function($stateProvider) {
@@ -35,6 +37,28 @@ angular.module('adage.enrichedSignatures', [
 
     self.statusMessage = 'Connecting to the server ...';
 
+    // Do nothing if no genes are specified in URL.
+    if (!$stateParams.genes || !$stateParams.genes.split(',').length) {
+      self.statusMessage = 'No genes are specified.';
+      self.enrichedSignatures = [];
+      return;
+    }
+
+    var userSelectedGenes = $stateParams.genes.split(',')
+
+    Signature.get(
+      {mlmodel: self.modelInUrl, limit: 0},
+      function success(response) {
+        self.signatures = response.objects;
+        self.statusMessage = '';
+      },
+      function error(err) {
+        var message = errGen('Failed to get signatures: ', err);
+        $log.error(message);
+        self.statusMessage = message + '. Please try again later.';
+      }
+    );
+
     // For the moment, the total number of genes in our universe
     // to perform this enrichment analysis, is the total number of
     // Entrez IDs in our database for Pseudomonas aeruginosa.
@@ -50,95 +74,71 @@ angular.module('adage.enrichedSignatures', [
       }
     );
 
-
-    // Do nothing if no genes are specified in URL.
-    if (!$stateParams.genes || !$stateParams.genes.split(',').length) {
-      self.statusMessage = 'No genes are specified.';
-      self.enrichedSignatures = [];
-      return;
-    }
-
     self.pValueCutoff = 0.05;
     var pValueSigDigits = 3;
 
     // This is an object, of signatures per participation type
     var signtrsPerPT = {};
 
-    var relevantSignatureArray = [];
+    self.enrichedSignatures = {};
 
     // This is the main function that calculates the signature enrichments.
     // It calculates the enrichment for each signature that has participatory
     // genes which were in the url genes (the genes searched).
-    var calculateEnrichments = function(geneGenesets, allGenesetInfo,
-                                        totalGeneNum, cutoff) {
+    var calculateEnrichments = function(totalGeneNum, signature, cutoff) {
+      // For the moment, this is the total number of Entrez IDs for
+      // Pseudomonas in the database.
       var N = totalGeneNum;
 
-      // This will be the number of genes from the high weight gene list
-      // that are also present in any of the genesets that were returned
-      var m = 0;
-
-      // Fill out the genesetGenes object
-      for (var i = 0; i < $scope.genes.length; i++) {
-        var genesetList = null;
-        var geneEntrezID = $scope.genes[i].entrezID;
-
-        if (geneGenesets.hasOwnProperty(geneEntrezID)) {
-          genesetList = geneGenesets[geneEntrezID];
-
-          if (genesetList && genesetList.length > 0) {
-            m += 1;
-          }
-
-          for (var j = 0; j < genesetList.length; j++) {
-            var genesetID = genesetList[j];
-            if (!genesetGenes[genesetID]) {
-              genesetGenes[genesetID] = [];
-            }
-            genesetGenes[genesetID].push($scope.genes[i]);
-          }
-        } else {
-          $log.warn('Entrez ID: ' + geneEntrezID + ' not found in ' +
-                    'genesets.');
-        }
-      }
+      // This will be the number of genes in the url (which are the genes the
+      // user selected in the previous page)
+      var m = userSelectedGenes.length;
 
       var pValueArray = [];
 
-      var enrichedGenesetIDs = Object.keys(genesetGenes);
+      var signatureIds = Object.keys(signatures);
 
-      for (i = 0; i < enrichedGenesetIDs.length; i++) {
-        var k = genesetGenes[enrichedGenesetIDs[i]].length;
-        var n = allGenesetInfo[enrichedGenesetIDs[i]].size;
+      for (var i = 0; i < signatureIds.length; i++) {
+        var signatureId = signatureIds[i];
+        var genes = signatures[signatureId];
+        var n = genes.length;
+        var k = 0;
+
+        for (i = 0; i < userSelectedGenes.length; i++) {
+          var selectedGene = userSelectedGenes[i];
+          if (genes.indexOf(selectedGene) > -1) {
+            k++;
+          }
+        }
 
         var pValue = 1 - MathFuncts.hyperGeometricTest(k, m, n, N);
         pValueArray.push(pValue);
       }
 
+      var significantSignatureArray = [];
+
       var correctedPValues = MathFuncts.multTest.fdr(pValueArray);
 
-      for (i = 0; i < enrichedGenesetIDs.length; i++) {
+      for (i = 0; i < correctedPValues.length; i++) {
         var correctedPValue = correctedPValues[i].toPrecision(
           pValueSigDigits);
 
         if (correctedPValue < self.pValueCutoff) {
-          var gsID = enrichedGenesetIDs[i];
-          var genesetInfoObj = allGenesetInfo[gsID];
+          var signatureId = signatureIds[i];
+          var genes = signatures[signatureId];
 
-          relevantSignatureArray.push({
-            'name': genesetInfoObj.name, 'dbase': genesetInfoObj.dbase,
-            'url': genesetInfoObj.url, 'pValue': correctedPValue,
-            'genes': genesetGenes[gsID].map(function(gene) {
-              return gene.stdName;
-            }).join(' ')
+          significantSignatureArray.push({
+            'signatureId': signatureId, 'genes': genes,
+            'pValue': correctedPValue
           });
         }
       }
 
-      relevantSignatureArray.sort(function(a, b) {
+      significantSignatureArray.sort(function(a, b) {
         return a.pValue - b.pValue;
       });
 
-      return relevantSignatureArray;
+      return significantSignatureArray;
     };
 
 
@@ -146,7 +146,6 @@ angular.module('adage.enrichedSignatures', [
       {'mlmodel': self.modelInUrl, 'gene__in': $stateParams.genes, 'limit': 0},
       function success(response) {
         var allParticipations = response.objects;
-        console.log(allParticipations);
 
         for (var i = 0; i < allParticipations.length; i++) {
           var participType = allParticipations[i].participation_type.name;
@@ -174,23 +173,13 @@ angular.module('adage.enrichedSignatures', [
 
         for (var i = 0; i < participationTypes.length; i++) {
           var signatures = signtrsPerPT[participationTypes[i]];
-          var signatureIds = Object.keys(signatures);
 
-          for (var i = 0; i < signatureIds.length; i++) {
-            var signatureId = signatureIds[i];
-            var genes = signatures[signatureId];
-
-          }
+          self.enrichedSignatures[participationTypes[i]] = calculateEnrichments(
+            totalGeneNum, signatures, self.pValueCutoff
+          );
         }
 
-        console.log(signtrsPerPT);
-
         self.statusMessage = '';
-
-        // self.enrichedGenesets = calculateEnrichments(
-        //   genesetsPerGene, gsInfoArray,
-        //   totGeneNum, self.pValueCutoff
-        // );
       },
       function error(err) {
         var message = errGen('Failed to get gene participations: ', err);
@@ -200,22 +189,6 @@ angular.module('adage.enrichedSignatures', [
 
     );
 
-
-
-
-
-    Signature.get(
-      {mlmodel: self.modelInUrl, limit: 0},
-      function success(response) {
-        self.signatures = response.objects;
-        self.statusMessage = '';
-      },
-      function error(err) {
-        var message = errGen('Failed to get signatures: ', err);
-        $log.error(message);
-        self.statusMessage = message + '. Please try again later.';
-      }
-    );
   }
 ])
 
