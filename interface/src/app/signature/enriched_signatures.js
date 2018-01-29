@@ -1,5 +1,5 @@
 /**
- * "adage.enriched_signatures" module.
+ * "adage.enrichedSignatures" module.
  */
 
 angular.module('adage.enrichedSignatures', [
